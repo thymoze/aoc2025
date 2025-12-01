@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 const _EXAMPLE: &str = r"L68
 L30
 R48
@@ -24,27 +22,26 @@ fn parse(input: &str) -> Vec<i32> {
 }
 
 fn day01(input: &Vec<i32>) -> u32 {
-    let mut count = 0;
-    let mut sum = 50;
+    let mut password = 0;
+    let mut dial = 50;
     for x in input {
-        sum = (sum + x).rem_euclid(100);
-        if sum == 0 {
-            count += 1;
-        }
+        dial = (dial + x).rem_euclid(100);
+        password += u32::from(dial == 0);
     }
-    count
+    password
 }
 
 fn day02(input: &Vec<i32>) -> u32 {
-    let mut count = 0;
-    let mut sum = 50;
+    let mut password = 0;
+    let mut dial = 50;
     for x in input {
-        let (div, rem) = (x / 100, x % 100);
-        let next = sum + rem;
-        count += div.unsigned_abs() + u32::from(sum != 0 && (next <= 0 || next >= 100));
-        sum = next.rem_euclid(100);
+        let next = dial + x;
+        let rotations = (next / 100).unsigned_abs();
+        let crosses_zero = next == 0 || dial.signum() + next.signum() == 0;
+        password += rotations + u32::from(crosses_zero);
+        dial = next.rem_euclid(100);
     }
-    count
+    password
 }
 
 fn main() {
