@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 const _EXAMPLE: &str = r"L68
 L30
 R48
@@ -48,9 +50,14 @@ fn main() {
     let input = std::fs::read_to_string("input/day01.txt").unwrap();
     let input = parse(&input);
 
+    let now = Instant::now();
     let result1 = day01(&input);
-    let result2 = day02(&input);
+    let time1 = now.elapsed();
 
-    println!("part1: {result1}");
-    println!("part2: {result2}");
+    let now = Instant::now();
+    let result2 = day02(&input);
+    let time2 = now.elapsed();
+
+    println!("part1: {result1} after {time1:?}");
+    println!("part2: {result2} after {time2:?}");
 }
