@@ -29,7 +29,7 @@ fn has_pattern1(x: u64) -> bool {
     upper == lower
 }
 
-fn day01(input: &[(u64, u64)]) -> u64 {
+fn part1(input: &[(u64, u64)]) -> u64 {
     input
         .iter()
         .flat_map(|(low, high)| (*low..=*high).filter(|x| has_pattern1(*x)))
@@ -76,7 +76,7 @@ fn has_pattern2(x: u64) -> bool {
     })
 }
 
-fn day02(input: &[(u64, u64)]) -> u64 {
+fn part2(input: &[(u64, u64)]) -> u64 {
     input
         .iter()
         .flat_map(|(low, high)| (*low..=*high).filter(|x| has_pattern2(*x)))
@@ -88,11 +88,11 @@ fn main() {
     let input = parse(&input);
 
     let now = Instant::now();
-    let result1 = day01(&input);
+    let result1 = part1(&input);
     let time1 = now.elapsed();
 
     let now = Instant::now();
-    let result2 = day02(&input);
+    let result2 = part2(&input);
     let time2 = now.elapsed();
 
     println!("part1: {result1} after {time1:?}");

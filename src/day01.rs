@@ -23,7 +23,7 @@ fn parse(input: &str) -> Vec<i32> {
         .collect()
 }
 
-fn day01(input: &Vec<i32>) -> u32 {
+fn part1(input: &Vec<i32>) -> u32 {
     let mut password = 0;
     let mut dial = 50;
     for x in input {
@@ -33,7 +33,7 @@ fn day01(input: &Vec<i32>) -> u32 {
     password
 }
 
-fn day02(input: &Vec<i32>) -> u32 {
+fn part2(input: &Vec<i32>) -> u32 {
     let mut password = 0;
     let mut dial = 50;
     for x in input {
@@ -51,11 +51,11 @@ fn main() {
     let input = parse(&input);
 
     let now = Instant::now();
-    let result1 = day01(&input);
+    let result1 = part1(&input);
     let time1 = now.elapsed();
 
     let now = Instant::now();
-    let result2 = day02(&input);
+    let result2 = part2(&input);
     let time2 = now.elapsed();
 
     println!("part1: {result1} after {time1:?}");
