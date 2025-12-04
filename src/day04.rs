@@ -67,7 +67,6 @@ fn part1(rolls: &[Vec<bool>]) -> u32 {
 fn part2(mut rolls: Vec<Vec<bool>>) -> u64 {
     let mut accessible = 0;
     loop {
-        let last_accessible = accessible;
         let mut to_remove = Vec::new();
         for i in 0..rolls.len() {
             for j in 0..rolls[0].len() {
@@ -80,11 +79,11 @@ fn part2(mut rolls: Vec<Vec<bool>>) -> u64 {
                 }
             }
         }
+        if to_remove.is_empty() {
+            break;
+        }
         for (i, j) in to_remove {
             rolls[i][j] = false;
-        }
-        if accessible == last_accessible {
-            break;
         }
     }
     accessible
