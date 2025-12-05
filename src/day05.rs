@@ -29,6 +29,22 @@ fn parse(input: &str) -> (Vec<(u64, u64)>, Vec<u64>) {
     (fresh, available)
 }
 
+fn merge_ranges(mut fresh: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
+    fresh.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+
+    let mut merged: Vec<(u64, u64)> = Vec::new();
+    for range in fresh {
+        if let Some(merged_range) = merged.last_mut()
+            && range.0 <= merged_range.1 + 1
+        {
+            merged_range.1 = merged_range.1.max(range.1);
+        } else {
+            merged.push(range);
+        }
+    }
+    merged
+}
+
 fn part1(fresh: &[(u64, u64)], available: &[u64]) -> usize {
     available
         .iter()
@@ -37,24 +53,13 @@ fn part1(fresh: &[(u64, u64)], available: &[u64]) -> usize {
 }
 
 fn part2(fresh: &[(u64, u64)]) -> u64 {
-    let mut merged: Vec<(u64, u64)> = Vec::new();
-    for range in fresh {
-        if let Some(merged_range) = merged.last_mut()
-            && range.0 <= merged_range.1 + 1
-        {
-            merged_range.1 = merged_range.1.max(range.1);
-        } else {
-            merged.push(*range);
-        }
-    }
-
-    merged.iter().map(|(lo, hi)| hi - lo + 1).sum()
+    fresh.iter().map(|(lo, hi)| hi - lo + 1).sum()
 }
 
 fn main() {
     let input = std::fs::read_to_string("input/day05.txt").unwrap();
-    let (mut fresh, available) = parse(&input);
-    fresh.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    let (fresh, available) = parse(&input);
+    let fresh = merge_ranges(fresh);
 
     let now = Instant::now();
     let result1 = part1(&fresh, &available);
