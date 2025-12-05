@@ -39,12 +39,10 @@ fn part1(fresh: &[(u64, u64)], available: &[u64]) -> usize {
 fn part2(fresh: &[(u64, u64)]) -> u64 {
     let mut merged: Vec<(u64, u64)> = Vec::new();
     for range in fresh {
-        if let Some(merged_range) = merged.last_mut() {
-            if range.0 <= merged_range.1 + 1 {
-                merged_range.1 = merged_range.1.max(range.1);
-            } else {
-                merged.push(*range);
-            }
+        if let Some(merged_range) = merged.last_mut()
+            && range.0 <= merged_range.1 + 1
+        {
+            merged_range.1 = merged_range.1.max(range.1);
         } else {
             merged.push(*range);
         }
