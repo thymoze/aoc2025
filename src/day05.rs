@@ -1,8 +1,8 @@
-use std::{collections::HashSet, time::Instant};
+use std::time::Instant;
 
 const _EXAMPLE: &str = r"3-5
-13-20
 10-14
+16-20
 12-18
 
 1
