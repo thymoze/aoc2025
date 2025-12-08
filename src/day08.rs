@@ -1,8 +1,4 @@
-use std::{
-    cmp::{Ordering, Reverse},
-    collections::{BinaryHeap, HashSet},
-    time::Instant,
-};
+use std::{mem::swap, time::Instant};
 
 const _EXAMPLE: &str = r"162,817,812
 57,618,57
@@ -54,28 +50,55 @@ struct Connection {
     to: usize,
 }
 
-impl PartialEq for Connection {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == Ordering::Equal
+struct DisjointSet {
+    pub parents: Vec<usize>,
+    pub sizes: Vec<usize>,
+}
+
+impl DisjointSet {
+    fn new(n: usize) -> Self {
+        Self {
+            parents: (0..n).collect(),
+            sizes: vec![1; n],
+        }
+    }
+
+    fn find(&mut self, mut x: usize) -> usize {
+        let mut root = x;
+        while self.parents[root] != root {
+            root = self.parents[root];
+        }
+        while self.parents[x] != x {
+            let next = self.parents[x];
+            self.parents[x] = root;
+            x = next;
+        }
+        root
+    }
+
+    fn size(&mut self, x: usize) -> usize {
+        let root = self.find(x);
+        self.sizes[root]
+    }
+
+    fn union(&mut self, mut x: usize, mut y: usize) {
+        x = self.find(x);
+        y = self.find(y);
+
+        if x == y {
+            return;
+        }
+
+        if self.sizes[x] < self.sizes[y] {
+            swap(&mut x, &mut y);
+        }
+        self.parents[y] = x;
+        self.sizes[x] += self.sizes[y];
     }
 }
 
-impl Eq for Connection {}
-
-impl PartialOrd for Connection {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Connection {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other.distance.total_cmp(&self.distance)
-    }
-}
-
-fn distances(junction_boxes: &[Position]) -> BinaryHeap<Connection> {
-    let mut distances = BinaryHeap::new();
+fn distances(junction_boxes: &[Position]) -> Vec<Connection> {
+    let mut distances = Vec::new();
     for (i, a) in junction_boxes.iter().enumerate() {
         for (j, b) in junction_boxes[i + 1..].iter().enumerate() {
             let conn = Connection {
@@ -87,44 +110,31 @@ fn distances(junction_boxes: &[Position]) -> BinaryHeap<Connection> {
             distances.push(conn);
         }
     }
+    distances.sort_by(|a, b| a.distance.total_cmp(&b.distance));
     distances
 }
 
-fn part1(mut distances: BinaryHeap<Connection>, n: usize) -> usize {
-    let mut circuits: Vec<HashSet<usize>> = Vec::new();
-    for _ in 0..n {
-        if let Some(min) = distances.pop() {
-            let mut circuit = HashSet::from_iter([min.from, min.to]);
-            for c in circuits.extract_if(.., |c| c.contains(&min.from) || c.contains(&min.to)) {
-                circuit = &circuit | &c;
-            }
-            circuits.push(circuit);
-        }
+fn part1(junction_boxes: &[Position], distances: &[Connection], n: usize) -> usize {
+    let mut circuits = DisjointSet::new(junction_boxes.len());
+    for min in distances.iter().take(n) {
+        circuits.union(min.from, min.to);
     }
-    let mut sizes: Vec<_> = circuits.into_iter().map(|c| c.len()).collect();
-    sizes.sort_by_key(|&x| Reverse(x));
+    let mut sizes = circuits.sizes.clone();
+    sizes.sort_by(|a, b| b.cmp(a));
     sizes.iter().take(3).product()
 }
 
-fn part2(junction_boxes: &[Position], mut distances: BinaryHeap<Connection>) -> i64 {
-    let mut circuits: Vec<HashSet<usize>> = Vec::new();
-    let conn = loop {
-        if let Some(min) = distances.pop() {
-            let mut circuit = HashSet::from_iter([min.from, min.to]);
-            for c in circuits.extract_if(.., |c| c.contains(&min.from) || c.contains(&min.to)) {
-                circuit = &circuit | &c;
-            }
-            if circuit.len() == junction_boxes.len() {
-                break min;
-            } else {
-                circuits.push(circuit);
-            }
+fn part2(junction_boxes: &[Position], distances: &[Connection]) -> i64 {
+    let mut circuits = DisjointSet::new(junction_boxes.len());
+    for min in distances {
+        circuits.union(min.from, min.to);
+        if circuits.size(min.from) == junction_boxes.len() {
+            let box1 = junction_boxes[min.from];
+            let box2 = junction_boxes[min.to];
+            return box1.0 * box2.0;
         }
-    };
-
-    let box1 = junction_boxes[conn.from];
-    let box2 = junction_boxes[conn.to];
-    box1.0 * box2.0
+    }
+    unreachable!()
 }
 
 fn main() {
@@ -133,11 +143,11 @@ fn main() {
     let distances = distances(&junction_boxes);
 
     let now = Instant::now();
-    let result1 = part1(distances.clone(), 1000);
+    let result1 = part1(&junction_boxes, &distances, 1000);
     let time1 = now.elapsed();
 
     let now = Instant::now();
-    let result2 = part2(&junction_boxes, distances);
+    let result2 = part2(&junction_boxes, &distances);
     let time2 = now.elapsed();
 
     println!("part1: {result1} after {time1:?}");
