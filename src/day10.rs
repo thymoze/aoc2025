@@ -1,7 +1,8 @@
 use std::{
     collections::{BinaryHeap, HashMap, HashSet, VecDeque},
     fmt::{Debug, Display},
-    ops::{Add, BitXor, Mul},
+    ops::{Add, BitXor, Index, IndexMut, Mul, Range},
+    slice::SliceIndex,
     time::Instant,
 };
 
@@ -55,7 +56,7 @@ impl BitXor for BitMask {
 struct Machine {
     indicator_diagram: BitMask,
     buttons: Vec<Vec<usize>>,
-    joltage: JoltageLevels,
+    joltage: Vec<i16>,
 }
 
 fn parse(input: &str) -> Vec<Machine> {
@@ -77,12 +78,10 @@ fn parse(input: &str) -> Vec<Machine> {
                 .map(|btn| (btn[1..btn.len() - 1].split(",").map(|d| d.parse().unwrap())).collect())
                 .collect();
 
-            let joltage = JoltageLevels(
-                joltage[1..joltage.len() - 1]
-                    .split(",")
-                    .map(|d| d.parse().unwrap())
-                    .collect(),
-            );
+            let joltage = joltage[1..joltage.len() - 1]
+                .split(",")
+                .map(|d| d.parse().unwrap())
+                .collect();
 
             Machine {
                 indicator_diagram,
@@ -125,119 +124,367 @@ fn part1(machines: &[Machine]) -> usize {
     presses
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct JoltageLevels(Vec<u8>);
-
-impl JoltageLevels {
-    fn distance(&self, other: &JoltageLevels) -> u32 {
-        self.0
-            .iter()
-            .zip(&other.0)
-            .map(|(a, b)| a.wrapping_sub(*b) as u32)
-            .fold(0, |acc, x| acc.saturating_add(x))
-    }
+#[derive(Debug, Clone, PartialEq)]
+struct Matrix {
+    data: Vec<f32>,
+    width: usize,
+    height: usize,
 }
-
-impl<'b> Add<&'b JoltageLevels> for &JoltageLevels {
-    type Output = JoltageLevels;
-
-    fn add(self, rhs: &'b JoltageLevels) -> Self::Output {
-        JoltageLevels(self.0.iter().zip(&rhs.0).map(|(a, b)| a + b).collect())
-    }
-}
-
-impl Mul<u8> for &JoltageLevels {
-    type Output = JoltageLevels;
-
-    fn mul(self, rhs: u8) -> Self::Output {
-        JoltageLevels(self.0.iter().map(|x| x * rhs).collect())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct JoltageCounter {
-    step: usize,
-    joltage: JoltageLevels,
-    target: JoltageLevels,
-}
-
-impl PartialOrd for JoltageCounter {
-    #[allow(clippy::non_canonical_partial_ord_impl)]
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.target != other.target {
-            return None;
+impl Matrix {
+    fn new(width: usize, height: usize) -> Self {
+        Self {
+            data: vec![0.0; width * height],
+            width,
+            height,
         }
-        Some(self.cmp(other))
     }
-}
 
-impl Ord for JoltageCounter {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        assert!(self.target == other.target);
-        self.target
-            .distance(&other.joltage)
-            .cmp(&self.target.distance(&self.joltage))
+    fn from_rows(rows: &[Vec<f32>]) -> Self {
+        let width = rows[0].len();
+        let height = rows.len();
+        let mut data = Vec::with_capacity(width * height);
+        for row in rows {
+            data.extend_from_slice(row);
+        }
+        Self {
+            data,
+            width,
+            height,
+        }
     }
-}
 
-fn part2(machines: &[Machine]) -> usize {
-    let mut presses = 0;
-    for (i, machine) in machines.iter().enumerate() {
-        print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
-        println!("{i} / {}", machines.len());
+    fn from_columns(cols: &[Vec<f32>]) -> Self {
+        let width = cols.len();
+        let height = cols[0].len();
+        let mut data = Vec::with_capacity(width * height);
+        for y in 0..height {
+            for col in cols {
+                data.push(col[y]);
+            }
+        }
+        Self {
+            data,
+            width,
+            height,
+        }
+    }
 
-        let btn_joltages: Vec<_> = machine
-            .buttons
-            .iter()
-            .map(|btn| {
-                let mut levels = vec![0; machine.joltage.0.len()];
-                for &i in btn {
-                    levels[i] = 1;
+    fn get_column(&self, x: usize) -> Vec<f32> {
+        let mut col = Vec::with_capacity(self.height);
+        for y in 0..self.height {
+            col.push(self[(x, y)]);
+        }
+        col
+    }
+
+    fn swap_rows(&mut self, a: usize, b: usize) {
+        let (a, b) = (a.min(b), a.max(b));
+        if a == b || b >= self.height {
+            return;
+        }
+        let (first, second) = self.data.split_at_mut(b * self.width);
+        let a = &mut first[a * self.width..(a + 1) * self.width];
+        let b = &mut second[..self.width];
+        a.swap_with_slice(b);
+    }
+
+    fn as_reduced_row_echelon_form(&mut self) {
+        for k in 0..self.width - 1 {
+            let x = k.min(self.width - 1);
+            let y = k.min(self.height - 1);
+            dbg!((x, y));
+            println!("{self}\n");
+
+            if self[(0..x, y)].iter().any(|v| *v != 0.0) {
+                continue;
+            }
+
+            let mut val = self[(x, y)];
+            let mut max_row = y;
+            for j in (y + 1)..self.height {
+                let v = self[(x, j)];
+                if v > 0. && (val == 0.0 || v < val.abs()) {
+                    val = self[(x, j)];
+                    max_row = j;
                 }
-                JoltageLevels(levels)
-            })
-            .collect();
+            }
+            if y != max_row {
+                // println!("swapping rows {y} and {max_row}");
+                self.swap_rows(y, max_row);
+            }
 
-        let mut visited: HashMap<JoltageLevels, usize> = HashMap::new();
-        let mut queue = BinaryHeap::from_iter(btn_joltages.iter().map(|j| JoltageCounter {
-            step: 1,
-            joltage: j.clone(),
-            target: machine.joltage.clone(),
-        }));
-        'outer: while let Some(counter) = queue.pop() {
-            // let distance = machine.joltage.distance(&counter.joltage);
-            // println!("{:?}", (&counter, distance));
-
-            for joltage in &btn_joltages {
-                for factor in [20u8, 10, 1] {
-                    let next_step = counter.step + factor as usize;
-                    let next = &counter.joltage + &(joltage * factor);
-                    if next == machine.joltage {
-                        presses += next_step;
-                        break 'outer;
-                    }
-
-                    if let Some(step) = visited.get_mut(&next) {
-                        if next_step < *step {
-                            *step = next_step;
-                            // *prev = counter.joltage.clone();
-                        } else {
-                            continue;
-                        }
-                    } else {
-                        visited.insert(next.clone(), next_step);
-                    }
-
-                    queue.push(JoltageCounter {
-                        step: next_step,
-                        joltage: next,
-                        target: counter.target.clone(),
-                    });
+            if val == 0.0 {
+                continue;
+            }
+            if val > 0.0 && val < 1.0 {
+                // println!("normalizing current row: / {val}");
+                for col in x..self.width {
+                    self[(col, y)] /= val;
                 }
+                self[(x, y)] = 1.0;
+            }
+
+            for row in 0..self.height {
+                if row == y {
+                    continue;
+                }
+                let factor = self[(x, row)] / self[(x, y)];
+                if factor == 0.0 {
+                    continue;
+                }
+                // println!("row {row} -= {factor} * row {y}");
+                for col in (x + 1)..self.width {
+                    self[(col, row)] -= factor * self[(col, y)];
+                }
+                self[(x, row)] = 0.0;
             }
         }
     }
-    presses
+}
+impl Index<(usize, usize)> for Matrix {
+    type Output = f32;
+
+    fn index(&self, (x, y): (usize, usize)) -> &Self::Output {
+        assert!(
+            x < self.width && y < self.height,
+            "indexing ({}, {}) matrix at ({x}, {y}):\n{self}",
+            self.width,
+            self.height
+        );
+        &self.data[x + self.width * y]
+    }
+}
+impl IndexMut<(usize, usize)> for Matrix {
+    fn index_mut(&mut self, (x, y): (usize, usize)) -> &mut Self::Output {
+        assert!(
+            x < self.width && y < self.height,
+            "indexing ({}, {}) matrix at ({x}, {y})",
+            self.width,
+            self.height
+        );
+        &mut self.data[x + self.width * y]
+    }
+}
+impl Index<(Range<usize>, usize)> for Matrix {
+    type Output = [f32];
+
+    fn index(&self, (x, y): (Range<usize>, usize)) -> &Self::Output {
+        assert!(x.end < self.width && y < self.height);
+        &self.data[self.width * y..self.width * (y + 1)][x]
+    }
+}
+
+impl<'b> Mul<&'b Matrix> for &Matrix {
+    type Output = Matrix;
+
+    fn mul(self, rhs: &'b Matrix) -> Self::Output {
+        assert_eq!(
+            self.width, rhs.height,
+            "cant multiply matrices: \n{self} \n {rhs}"
+        );
+        let mut result = Matrix::new(rhs.width, self.height);
+        for y in 0..self.height {
+            for x in 0..rhs.width {
+                let mut sum = 0.0;
+                for i in 0..self.width {
+                    sum += self[(i, y)] * rhs[(x, i)];
+                }
+                result[(x, y)] = sum;
+            }
+        }
+        result
+    }
+}
+
+impl Display for Matrix {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        for y in 0..self.height {
+            if y != 0 {
+                write!(f, " ")?;
+            }
+            write!(f, "[")?;
+            for x in 0..self.width {
+                write!(
+                    f,
+                    "{:>4.precision$}",
+                    self[(x, y)],
+                    precision = (self[(x, y)].fract() * 100.).min(2.) as usize
+                )?;
+                if x != self.width - 1 {
+                    write!(f, ", ")?;
+                }
+            }
+            write!(f, "]")?;
+            if y != self.height - 1 {
+                writeln!(f, ",")?;
+            }
+        }
+        write!(f, "]")?;
+        Ok(())
+    }
+}
+
+fn solve_joltage(machine: &Machine) -> i16 {
+    let mut cols: Vec<_> = machine
+        .buttons
+        .iter()
+        .map(|btn| {
+            let mut x = Vec::new();
+            for i in 0..machine.joltage.len() {
+                x.push(if btn.contains(&i) { 1. } else { 0. });
+            }
+            x
+        })
+        .collect();
+    let btn_matrix = Matrix::from_columns(&cols);
+    let joltage: Vec<_> = machine.joltage.iter().map(|j| *j as f32).collect();
+
+    cols.push(joltage.clone());
+    let mut matrix = Matrix::from_columns(&cols);
+    // println!("{matrix}\n");
+    matrix.as_reduced_row_echelon_form();
+
+    // println!("{matrix}\n");
+    let width = matrix.width;
+    // for y in 0..matrix.height {
+    //     if matrix[(width - 1, y)] < 0.0 {
+    //         // for x in 0..width {
+    //         matrix[(width - 1, y)] *= -1.0;
+    //         // }
+    //     }
+    // }
+    println!("{matrix}\n");
+
+    let mut result = vec![0.0; machine.buttons.len()];
+    let mut identity_columns = Vec::new();
+    let mut lincomb_columns = Vec::new();
+    for x in 0..width - 1 {
+        let column = matrix.get_column(x);
+        let identity_idx = x.min(matrix.height - 1);
+        let mut is_identity_col = true;
+        for y in 0..matrix.height {
+            if y != identity_idx {
+                is_identity_col = is_identity_col && matrix[(x, y)] == 0.0;
+            } else {
+                is_identity_col = is_identity_col && matrix[(x, y)] == 1.0;
+            }
+        }
+        if is_identity_col && identity_columns.len() < matrix.height {
+            identity_columns.push((x, identity_idx));
+        } else {
+            lincomb_columns.push((x, column.iter().sum::<f32>(), column));
+        }
+    }
+
+    loop {
+        let last = matrix.get_column(width - 1);
+        let mut last_negative: Vec<_> =
+            last.iter().enumerate().filter(|(_, x)| **x < 0.0).collect();
+        if last_negative.is_empty() {
+            break;
+        }
+        last_negative.sort_by(|a, b| a.1.total_cmp(b.1));
+        dbg!(&last_negative);
+
+        for (y, _) in last_negative {
+            let mut max_negative = 0.0;
+            let mut idx = None;
+            for (i, (_, _, column)) in lincomb_columns.iter().enumerate() {
+                let val = column[y];
+                if val < max_negative {
+                    let factor = matrix[(width - 1, y)] / column[y];
+                    if factor.fract() != 0.0 {
+                        continue;
+                    }
+                    // if last.iter().any(|x| (x / val).fract() != 0.0) {
+                    //     continue;
+                    // }
+
+                    max_negative = val;
+                    idx = Some(i);
+                }
+            }
+            dbg!(y, max_negative, idx);
+            if let Some(idx) = idx {
+                let (x, _, column) = &lincomb_columns[idx];
+
+                let mut factor = f32::MAX;
+                for y in 0..matrix.height {
+                    if column[y] > 0.0 || (column[y] < 0.0 && matrix[(width - 1, y)] < 0.0) {
+                        let f = (matrix[(width - 1, y)] / column[y]).floor();
+                        dbg!(y, f, matrix[(width - 1, y)]);
+                        if f >= 0.0 {
+                            factor = factor.min(f);
+                        }
+                    }
+                }
+
+                dbg!(y, x, factor);
+                result[*x] += factor;
+                for y in 0..matrix.height {
+                    if column[y] != 0.0 {
+                        matrix[(width - 1, y)] -= factor * column[y];
+                    }
+                }
+            } else {
+                panic!()
+            }
+            println!("{matrix}\n");
+        }
+    }
+
+    // dbg!(&identity_columns, &lincomb_columns);
+
+    lincomb_columns.sort_by(|a, b| b.1.total_cmp(&a.1));
+    for (x, sum, column) in lincomb_columns {
+        if sum > 1.0 {
+            let mut min = f32::MAX;
+            for y in 0..matrix.height {
+                if column[y] > 0.0 {
+                    min = min.min(matrix[(width - 1, y)] / column[y]);
+                }
+            }
+
+            result[x] += min;
+            for y in 0..matrix.height {
+                if column[y] != 0.0 {
+                    matrix[(width - 1, y)] -= min * column[y];
+                }
+            }
+        } else {
+            break;
+        }
+    }
+    println!("{matrix}");
+    dbg!(&result);
+    for (x, i) in identity_columns {
+        result[x] = matrix[(width - 1, i)];
+    }
+    dbg!(&result);
+    // result[7] += 1.;
+
+    let result_matrix = Matrix::from_columns(&[result.clone()]);
+
+    let test = &btn_matrix * &result_matrix;
+    let expected = Matrix::from_columns(std::slice::from_ref(&joltage));
+
+    assert_eq!(
+        test, expected,
+        "multiplied \n{btn_matrix}\n * \n{result_matrix}\nfor machine\n{machine:?}\n"
+    );
+
+    result.iter().map(|r| *r as i16).sum()
+}
+
+fn part2(machines: &[Machine]) -> usize {
+    dbg!(solve_joltage(&machines[11]));
+    todo!();
+
+    machines
+        .iter()
+        .map(|machine| solve_joltage(machine) as usize)
+        .sum()
 }
 
 fn main() {
