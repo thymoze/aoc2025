@@ -1,8 +1,9 @@
+use bitmask::BitMask;
+use matrix::Matrix;
 use std::{
-    collections::{BinaryHeap, HashMap, HashSet, VecDeque},
-    fmt::{Debug, Display},
-    ops::{Add, BitXor, Index, IndexMut, Mul, Range},
-    slice::SliceIndex,
+    collections::{HashSet, VecDeque},
+    fmt::Debug,
+    iter::{once, repeat_n},
     time::Instant,
 };
 
@@ -10,47 +11,6 @@ const _EXAMPLE: &str = r"[.##.] (3) (1,3) (2) (2,3) (0,2) (0,1) {3,5,4,7}
 [...#.] (0,2,3,4) (2,3) (0,4) (0,1,2) (1,2,3,4) {7,5,12,7,2}
 [.###.#] (0,1,2,3,4) (0,3,4) (0,1,2,4,5) (1,2) {10,11,11,5,10,5}
 ";
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct BitMask(u16);
-
-impl BitMask {
-    fn new() -> Self {
-        Self(0)
-    }
-
-    fn with_bits(bits: impl Iterator<Item = usize>) -> Self {
-        let mut mask = 0;
-        for i in bits {
-            mask |= 1 << i;
-        }
-        Self(mask)
-    }
-
-    fn toggle(&mut self, button: BitMask) {
-        self.0 ^= button.0;
-    }
-}
-
-impl Debug for BitMask {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{:0>16b}]", self.0)
-    }
-}
-
-impl Display for BitMask {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{:0>16b}]", self.0)
-    }
-}
-
-impl BitXor for BitMask {
-    type Output = Self;
-
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        Self(self.0 ^ rhs.0)
-    }
-}
 
 #[derive(Debug)]
 struct Machine {
@@ -124,208 +84,127 @@ fn part1(machines: &[Machine]) -> usize {
     presses
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct Matrix {
-    data: Vec<f32>,
-    width: usize,
-    height: usize,
+fn to_tableau(augmented_matrix: &mut Matrix, objective_coeff: impl Iterator<Item = f64>) {
+    let objective = objective_coeff.chain(once(0.0));
+    augmented_matrix.insert_row(0, objective);
+    let first_col = once(1.0).chain(repeat_n(0.0, augmented_matrix.height - 1));
+    augmented_matrix.insert_column(0, first_col);
 }
-impl Matrix {
-    fn new(width: usize, height: usize) -> Self {
-        Self {
-            data: vec![0.0; width * height],
-            width,
-            height,
+
+fn simplex_phase1(mut tableau: Matrix) -> Matrix {
+    let orig_height = tableau.height;
+    let orig_width = tableau.width;
+    for y in 1..tableau.height {
+        tableau.insert_column(
+            tableau.width - 1,
+            (0..tableau.height).map(|x| if x == y { 1.0 } else { 0.0 }),
+        );
+    }
+    to_tableau(
+        &mut tableau,
+        repeat_n(0.0, orig_width - 1).chain(repeat_n(-1.0, orig_height - 1)),
+    );
+    for y in 0..orig_height - 1 {
+        for x in 0..tableau.width {
+            tableau[(x, 0)] += tableau[(x, y + 2)];
         }
     }
-
-    fn from_rows(rows: &[Vec<f32>]) -> Self {
-        let width = rows[0].len();
-        let height = rows.len();
-        let mut data = Vec::with_capacity(width * height);
-        for row in rows {
-            data.extend_from_slice(row);
-        }
-        Self {
-            data,
-            width,
-            height,
-        }
+    // println!("{tableau}");
+    let mut result = simplex_solve(tableau);
+    result.remove_row(0);
+    result.remove_column(0);
+    for _ in 1..result.height {
+        result.remove_column(result.width - 2);
     }
+    // println!("{result}");
+    result
+}
 
-    fn from_columns(cols: &[Vec<f32>]) -> Self {
-        let width = cols.len();
-        let height = cols[0].len();
-        let mut data = Vec::with_capacity(width * height);
-        for y in 0..height {
-            for col in cols {
-                data.push(col[y]);
-            }
-        }
-        Self {
-            data,
-            width,
-            height,
-        }
-    }
-
-    fn get_column(&self, x: usize) -> Vec<f32> {
-        let mut col = Vec::with_capacity(self.height);
-        for y in 0..self.height {
-            col.push(self[(x, y)]);
-        }
-        col
-    }
-
-    fn swap_rows(&mut self, a: usize, b: usize) {
-        let (a, b) = (a.min(b), a.max(b));
-        if a == b || b >= self.height {
-            return;
-        }
-        let (first, second) = self.data.split_at_mut(b * self.width);
-        let a = &mut first[a * self.width..(a + 1) * self.width];
-        let b = &mut second[..self.width];
-        a.swap_with_slice(b);
-    }
-
-    fn as_reduced_row_echelon_form(&mut self) {
-        for k in 0..self.width - 1 {
-            let x = k.min(self.width - 1);
-            let y = k.min(self.height - 1);
-            dbg!((x, y));
-            println!("{self}\n");
-
-            if self[(0..x, y)].iter().any(|v| *v != 0.0) {
+fn simplex_solve(mut tableau: Matrix) -> Matrix {
+    // println!("{tableau}");
+    loop {
+        // if i == 5 {
+        //     break;
+        // }
+        // i += 1;
+        let objective_row = tableau
+            .get_row(0)
+            .iter()
+            .enumerate()
+            .take(tableau.width - 1)
+            .skip(1);
+        let mut pivot_col = objective_row.filter(|(_, x)| **x > 0.0);
+        if let Some((pivot_col, _)) = pivot_col.next() {
+            // dbg!(pivot_col);
+            let col = tableau.get_column(pivot_col);
+            let basic = tableau.get_column(tableau.width - 1);
+            let (pivot_row, _) = col
+                .iter()
+                .zip(basic)
+                .enumerate()
+                .skip(1)
+                .filter(|(_, (a, _))| **a > 0.0)
+                .map(|(i, (a, b))| (i, b / a))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .unwrap();
+            let pivot = tableau[(pivot_col, pivot_row)];
+            if pivot == 0.0 {
                 continue;
             }
+            // dbg!(pivot_row, pivot);
 
-            let mut val = self[(x, y)];
-            let mut max_row = y;
-            for j in (y + 1)..self.height {
-                let v = self[(x, j)];
-                if v > 0. && (val == 0.0 || v < val.abs()) {
-                    val = self[(x, j)];
-                    max_row = j;
-                }
+            for x in 0..tableau.width {
+                tableau[(x, pivot_row)] /= pivot;
             }
-            if y != max_row {
-                // println!("swapping rows {y} and {max_row}");
-                self.swap_rows(y, max_row);
-            }
-
-            if val == 0.0 {
-                continue;
-            }
-            if val > 0.0 && val < 1.0 {
-                // println!("normalizing current row: / {val}");
-                for col in x..self.width {
-                    self[(col, y)] /= val;
-                }
-                self[(x, y)] = 1.0;
-            }
-
-            for row in 0..self.height {
-                if row == y {
+            // tableau[(pivot_col, pivot_row)] = 1.0;
+            for y in 0..tableau.height {
+                if y == pivot_row {
                     continue;
                 }
-                let factor = self[(x, row)] / self[(x, y)];
-                if factor == 0.0 {
-                    continue;
+                let factor = tableau[(pivot_col, y)];
+                for x in 0..tableau.width {
+                    tableau[(x, y)] -= factor * tableau[(x, pivot_row)];
                 }
-                // println!("row {row} -= {factor} * row {y}");
-                for col in (x + 1)..self.width {
-                    self[(col, row)] -= factor * self[(col, y)];
-                }
-                self[(x, row)] = 0.0;
+                // tableau[(pivot_col, y)] = 0.0;
             }
+            // println!("{tableau}");
+        } else {
+            break;
         }
     }
-}
-impl Index<(usize, usize)> for Matrix {
-    type Output = f32;
-
-    fn index(&self, (x, y): (usize, usize)) -> &Self::Output {
-        assert!(
-            x < self.width && y < self.height,
-            "indexing ({}, {}) matrix at ({x}, {y}):\n{self}",
-            self.width,
-            self.height
-        );
-        &self.data[x + self.width * y]
-    }
-}
-impl IndexMut<(usize, usize)> for Matrix {
-    fn index_mut(&mut self, (x, y): (usize, usize)) -> &mut Self::Output {
-        assert!(
-            x < self.width && y < self.height,
-            "indexing ({}, {}) matrix at ({x}, {y})",
-            self.width,
-            self.height
-        );
-        &mut self.data[x + self.width * y]
-    }
-}
-impl Index<(Range<usize>, usize)> for Matrix {
-    type Output = [f32];
-
-    fn index(&self, (x, y): (Range<usize>, usize)) -> &Self::Output {
-        assert!(x.end < self.width && y < self.height);
-        &self.data[self.width * y..self.width * (y + 1)][x]
-    }
+    tableau
 }
 
-impl<'b> Mul<&'b Matrix> for &Matrix {
-    type Output = Matrix;
+fn simplex(tableau: Matrix) -> Matrix {
+    let tableau = simplex_phase1(tableau);
+    // println!("{tableau}");
+    let mut tableau = simplex_solve(tableau);
+    // println!("{tableau}");
 
-    fn mul(self, rhs: &'b Matrix) -> Self::Output {
-        assert_eq!(
-            self.width, rhs.height,
-            "cant multiply matrices: \n{self} \n {rhs}"
-        );
-        let mut result = Matrix::new(rhs.width, self.height);
-        for y in 0..self.height {
-            for x in 0..rhs.width {
-                let mut sum = 0.0;
-                for i in 0..self.width {
-                    sum += self[(i, y)] * rhs[(x, i)];
-                }
-                result[(x, y)] = sum;
-            }
-        }
-        result
-    }
-}
-
-impl Display for Matrix {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[")?;
-        for y in 0..self.height {
-            if y != 0 {
-                write!(f, " ")?;
-            }
-            write!(f, "[")?;
-            for x in 0..self.width {
-                write!(
-                    f,
-                    "{:>4.precision$}",
-                    self[(x, y)],
-                    precision = (self[(x, y)].fract() * 100.).min(2.) as usize
-                )?;
-                if x != self.width - 1 {
-                    write!(f, ", ")?;
+    for x in 0..tableau.width {
+        let mut is_identity = true;
+        let mut identity_idx = None;
+        for y in 0..tableau.height {
+            let val = tableau[(x, y)];
+            if val != 0.0 {
+                if val == 1.0 && identity_idx.is_none() {
+                    identity_idx = Some(y);
+                } else {
+                    is_identity = false;
                 }
             }
-            write!(f, "]")?;
-            if y != self.height - 1 {
-                writeln!(f, ",")?;
-            }
         }
-        write!(f, "]")?;
-        Ok(())
+        if is_identity && let Some(identity_idx) = identity_idx {
+            tableau.swap_rows(identity_idx, x.min(tableau.height - 1));
+        }
     }
+
+    tableau
 }
 
-fn solve_joltage(machine: &Machine) -> i16 {
+const EPS: f64 = 1e-12;
+
+fn solve(machine: &Machine) -> usize {
     let mut cols: Vec<_> = machine
         .buttons
         .iter()
@@ -337,154 +216,71 @@ fn solve_joltage(machine: &Machine) -> i16 {
             x
         })
         .collect();
-    let btn_matrix = Matrix::from_columns(&cols);
-    let joltage: Vec<_> = machine.joltage.iter().map(|j| *j as f32).collect();
-
-    cols.push(joltage.clone());
+    let joltage: Vec<_> = machine.joltage.iter().map(|j| *j as f64).collect();
+    cols.push(joltage);
     let mut matrix = Matrix::from_columns(&cols);
-    // println!("{matrix}\n");
-    matrix.as_reduced_row_echelon_form();
+    to_tableau(&mut matrix, repeat_n(-1.0, machine.buttons.len()));
 
-    // println!("{matrix}\n");
-    let width = matrix.width;
-    // for y in 0..matrix.height {
-    //     if matrix[(width - 1, y)] < 0.0 {
-    //         // for x in 0..width {
-    //         matrix[(width - 1, y)] *= -1.0;
-    //         // }
-    //     }
-    // }
-    println!("{matrix}\n");
+    let mut queue = VecDeque::from([matrix]);
+    let mut best = None;
+    let mut bounds = HashSet::new();
 
-    let mut result = vec![0.0; machine.buttons.len()];
-    let mut identity_columns = Vec::new();
-    let mut lincomb_columns = Vec::new();
-    for x in 0..width - 1 {
-        let column = matrix.get_column(x);
-        let identity_idx = x.min(matrix.height - 1);
-        let mut is_identity_col = true;
-        for y in 0..matrix.height {
-            if y != identity_idx {
-                is_identity_col = is_identity_col && matrix[(x, y)] == 0.0;
-            } else {
-                is_identity_col = is_identity_col && matrix[(x, y)] == 1.0;
-            }
+    while let Some(tableau) = queue.pop_front() {
+        let mut tableau = simplex(tableau);
+        let result = tableau[(tableau.width - 1, 0)];
+        if let Some(best) = best
+            && result >= best as f64
+        {
+            continue;
         }
-        if is_identity_col && identity_columns.len() < matrix.height {
-            identity_columns.push((x, identity_idx));
+
+        let results = tableau.get_column(tableau.width - 1);
+
+        let mut fract: Vec<_> = results
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(_, x)| x.fract() > EPS && x.fract() < (1. - EPS))
+            .collect();
+        fract.sort_by(|(_, a), (_, b)| b.fract().total_cmp(&a.fract()));
+        if let Some((i, x)) = fract.first() {
+            let (down, up) = (x.floor(), x.ceil());
+            if bounds.contains(&(*i, down as i32, up as i32)) {
+                continue;
+            }
+            bounds.insert((*i, down as i32, up as i32));
+
+            tableau.insert_column(tableau.width - 1, repeat_n(0.0, tableau.height));
+
+            let mut down_tableau = tableau.clone();
+            down_tableau.append_row(
+                repeat_n(0.0, *i)
+                    .chain(once(1.0))
+                    .chain(repeat_n(0.0, tableau.width.saturating_sub(i + 3)))
+                    .chain(once(1.0))
+                    .chain(once(down)),
+            );
+            queue.push_back(down_tableau);
+
+            let mut up_tableau = tableau.clone();
+            up_tableau.append_row(
+                repeat_n(0.0, *i)
+                    .chain(once(1.0))
+                    .chain(repeat_n(0.0, tableau.width.saturating_sub(i + 3)))
+                    .chain(once(-1.0))
+                    .chain(once(up)),
+            );
+            queue.push_back(up_tableau);
         } else {
-            lincomb_columns.push((x, column.iter().sum::<f32>(), column));
+            best = Some(result as usize);
         }
     }
 
-    loop {
-        let last = matrix.get_column(width - 1);
-        let mut last_negative: Vec<_> =
-            last.iter().enumerate().filter(|(_, x)| **x < 0.0).collect();
-        if last_negative.is_empty() {
-            break;
-        }
-        last_negative.sort_by(|a, b| a.1.total_cmp(b.1));
-        dbg!(&last_negative);
-
-        for (y, _) in last_negative {
-            let mut max_negative = 0.0;
-            let mut idx = None;
-            for (i, (_, _, column)) in lincomb_columns.iter().enumerate() {
-                let val = column[y];
-                if val < max_negative {
-                    let factor = matrix[(width - 1, y)] / column[y];
-                    if factor.fract() != 0.0 {
-                        continue;
-                    }
-                    // if last.iter().any(|x| (x / val).fract() != 0.0) {
-                    //     continue;
-                    // }
-
-                    max_negative = val;
-                    idx = Some(i);
-                }
-            }
-            dbg!(y, max_negative, idx);
-            if let Some(idx) = idx {
-                let (x, _, column) = &lincomb_columns[idx];
-
-                let mut factor = f32::MAX;
-                for y in 0..matrix.height {
-                    if column[y] > 0.0 || (column[y] < 0.0 && matrix[(width - 1, y)] < 0.0) {
-                        let f = (matrix[(width - 1, y)] / column[y]).floor();
-                        dbg!(y, f, matrix[(width - 1, y)]);
-                        if f >= 0.0 {
-                            factor = factor.min(f);
-                        }
-                    }
-                }
-
-                dbg!(y, x, factor);
-                result[*x] += factor;
-                for y in 0..matrix.height {
-                    if column[y] != 0.0 {
-                        matrix[(width - 1, y)] -= factor * column[y];
-                    }
-                }
-            } else {
-                panic!()
-            }
-            println!("{matrix}\n");
-        }
-    }
-
-    // dbg!(&identity_columns, &lincomb_columns);
-
-    lincomb_columns.sort_by(|a, b| b.1.total_cmp(&a.1));
-    for (x, sum, column) in lincomb_columns {
-        if sum > 1.0 {
-            let mut min = f32::MAX;
-            for y in 0..matrix.height {
-                if column[y] > 0.0 {
-                    min = min.min(matrix[(width - 1, y)] / column[y]);
-                }
-            }
-
-            result[x] += min;
-            for y in 0..matrix.height {
-                if column[y] != 0.0 {
-                    matrix[(width - 1, y)] -= min * column[y];
-                }
-            }
-        } else {
-            break;
-        }
-    }
-    println!("{matrix}");
-    dbg!(&result);
-    for (x, i) in identity_columns {
-        result[x] = matrix[(width - 1, i)];
-    }
-    dbg!(&result);
-    // result[7] += 1.;
-
-    let result_matrix = Matrix::from_columns(&[result.clone()]);
-
-    let test = &btn_matrix * &result_matrix;
-    let expected = Matrix::from_columns(std::slice::from_ref(&joltage));
-
-    assert_eq!(
-        test, expected,
-        "multiplied \n{btn_matrix}\n * \n{result_matrix}\nfor machine\n{machine:?}\n"
-    );
-
-    result.iter().map(|r| *r as i16).sum()
+    best.unwrap()
 }
 
 fn part2(machines: &[Machine]) -> usize {
-    dbg!(solve_joltage(&machines[11]));
-    todo!();
-
-    machines
-        .iter()
-        .map(|machine| solve_joltage(machine) as usize)
-        .sum()
+    machines.iter().map(solve).sum()
 }
 
 fn main() {
@@ -501,4 +297,261 @@ fn main() {
     let time2 = now.elapsed();
 
     println!("part2: {result2} after {time2:?}");
+}
+
+mod bitmask {
+    use std::{
+        fmt::{Debug, Display},
+        ops::BitXor,
+    };
+
+    #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct BitMask(u16);
+
+    impl BitMask {
+        pub fn new() -> Self {
+            Self(0)
+        }
+
+        pub fn with_bits(bits: impl Iterator<Item = usize>) -> Self {
+            let mut mask = 0;
+            for i in bits {
+                mask |= 1 << i;
+            }
+            Self(mask)
+        }
+
+        pub fn toggle(&mut self, button: BitMask) {
+            self.0 ^= button.0;
+        }
+    }
+
+    impl Debug for BitMask {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "[{:0>16b}]", self.0)
+        }
+    }
+
+    impl Display for BitMask {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "[{:0>16b}]", self.0)
+        }
+    }
+
+    impl BitXor for BitMask {
+        type Output = Self;
+
+        fn bitxor(self, rhs: Self) -> Self::Output {
+            Self(self.0 ^ rhs.0)
+        }
+    }
+}
+
+mod matrix {
+    use std::{
+        fmt::Display,
+        ops::{Index, IndexMut, Mul, Range},
+    };
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct Matrix {
+        data: Vec<f64>,
+        pub width: usize,
+        pub height: usize,
+    }
+    impl Matrix {
+        pub fn new(width: usize, height: usize) -> Self {
+            Self {
+                data: vec![0.0; width * height],
+                width,
+                height,
+            }
+        }
+
+        pub fn from_rows(rows: &[Vec<f64>]) -> Self {
+            let width = rows[0].len();
+            let height = rows.len();
+            let mut data = Vec::with_capacity(width * height);
+            for row in rows {
+                data.extend_from_slice(row);
+            }
+            Self {
+                data,
+                width,
+                height,
+            }
+        }
+
+        pub fn from_columns(cols: &[Vec<f64>]) -> Self {
+            let width = cols.len();
+            let height = cols[0].len();
+            let mut data = Vec::with_capacity(width * height);
+            for y in 0..height {
+                for col in cols {
+                    data.push(col[y]);
+                }
+            }
+            Self {
+                data,
+                width,
+                height,
+            }
+        }
+
+        pub fn insert_row(&mut self, i: usize, row: impl Iterator<Item = f64>) {
+            assert_eq!(Some(self.width), row.size_hint().1);
+            self.data.reserve(self.width);
+            let idx = i * self.width;
+            self.data.splice(idx..idx, row);
+            self.height += 1;
+            assert_eq!(self.data.len(), self.width * self.height);
+        }
+
+        pub fn append_row(&mut self, row: impl Iterator<Item = f64>) {
+            self.insert_row(self.height, row);
+        }
+
+        pub fn insert_column(&mut self, i: usize, column: impl Iterator<Item = f64>) {
+            assert_eq!(Some(self.height), column.size_hint().1);
+            self.data.reserve(self.height);
+            for (y, c) in column.enumerate() {
+                self.data.insert(y * self.width + i + y, c);
+            }
+            self.width += 1;
+            assert_eq!(self.data.len(), self.width * self.height);
+        }
+
+        pub fn get_row(&self, y: usize) -> &[f64] {
+            &self.data[y * self.width..(y + 1) * self.width]
+        }
+
+        pub fn get_column(&self, x: usize) -> Vec<f64> {
+            let mut col = Vec::with_capacity(self.height);
+            for y in 0..self.height {
+                col.push(self[(x, y)]);
+            }
+            col
+        }
+
+        pub fn remove_row(&mut self, y: usize) {
+            self.data.drain(y * self.width..(y + 1) * self.width);
+            self.height -= 1;
+        }
+
+        pub fn remove_column(&mut self, x: usize) {
+            for y in 0..self.height {
+                self.data.remove(y * self.width + x - y);
+            }
+            self.width -= 1;
+        }
+
+        pub fn swap_rows(&mut self, a: usize, b: usize) {
+            let (a, b) = (a.min(b), a.max(b));
+            if a == b || b >= self.height {
+                return;
+            }
+            let (first, second) = self.data.split_at_mut(b * self.width);
+            let a = &mut first[a * self.width..(a + 1) * self.width];
+            let b = &mut second[..self.width];
+            a.swap_with_slice(b);
+        }
+    }
+
+    impl Index<(usize, usize)> for Matrix {
+        type Output = f64;
+
+        fn index(&self, (x, y): (usize, usize)) -> &Self::Output {
+            assert!(
+                x < self.width && y < self.height,
+                "indexing ({}, {}) matrix at ({x}, {y}):\n{self}",
+                self.width,
+                self.height
+            );
+            &self.data[x + self.width * y]
+        }
+    }
+
+    impl IndexMut<(usize, usize)> for Matrix {
+        fn index_mut(&mut self, (x, y): (usize, usize)) -> &mut Self::Output {
+            assert!(
+                x < self.width && y < self.height,
+                "indexing ({}, {}) matrix at ({x}, {y})",
+                self.width,
+                self.height
+            );
+            &mut self.data[x + self.width * y]
+        }
+    }
+
+    impl Index<(Range<usize>, usize)> for Matrix {
+        type Output = [f64];
+
+        fn index(&self, (x, y): (Range<usize>, usize)) -> &Self::Output {
+            assert!(x.end < self.width && y < self.height);
+            &self.data[self.width * y..self.width * (y + 1)][x]
+        }
+    }
+
+    impl<'b> Mul<&'b Matrix> for &Matrix {
+        type Output = Matrix;
+
+        fn mul(self, rhs: &'b Matrix) -> Self::Output {
+            assert_eq!(
+                self.width, rhs.height,
+                "cant multiply matrices: \n{self} \n {rhs}"
+            );
+            let mut result = Matrix::new(rhs.width, self.height);
+            for y in 0..self.height {
+                for x in 0..rhs.width {
+                    let mut sum = 0.0;
+                    for i in 0..self.width {
+                        sum += self[(i, y)] * rhs[(x, i)];
+                    }
+                    result[(x, y)] = sum;
+                }
+            }
+            result
+        }
+    }
+
+    impl Mul<f64> for &Matrix {
+        type Output = Matrix;
+
+        fn mul(self, rhs: f64) -> Self::Output {
+            Self::Output {
+                width: self.width,
+                height: self.height,
+                data: self.data.iter().map(|x| x * rhs).collect(),
+            }
+        }
+    }
+
+    impl Display for Matrix {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "[")?;
+            for y in 0..self.height {
+                if y != 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "[")?;
+                for x in 0..self.width {
+                    write!(
+                        f,
+                        "{:>6.2}",
+                        self[(x, y)],
+                        // precision = (self[(x, y)].fract() * 100.).min(2.) as usize
+                    )?;
+                    if x != self.width - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]")?;
+                if y != self.height - 1 {
+                    writeln!(f, ",")?;
+                }
+            }
+            write!(f, "]")?;
+            Ok(())
+        }
+    }
 }
