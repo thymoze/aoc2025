@@ -109,24 +109,17 @@ fn simplex_phase1(mut tableau: Matrix) -> Matrix {
             tableau[(x, 0)] += tableau[(x, y + 2)];
         }
     }
-    // println!("{tableau}");
     let mut result = simplex_solve(tableau);
     result.remove_row(0);
     result.remove_column(0);
     for _ in 1..result.height {
         result.remove_column(result.width - 2);
     }
-    // println!("{result}");
     result
 }
 
 fn simplex_solve(mut tableau: Matrix) -> Matrix {
-    // println!("{tableau}");
     loop {
-        // if i == 5 {
-        //     break;
-        // }
-        // i += 1;
         let objective_row = tableau
             .get_row(0)
             .iter()
@@ -135,7 +128,6 @@ fn simplex_solve(mut tableau: Matrix) -> Matrix {
             .skip(1);
         let mut pivot_col = objective_row.filter(|(_, x)| **x > 0.0);
         if let Some((pivot_col, _)) = pivot_col.next() {
-            // dbg!(pivot_col);
             let col = tableau.get_column(pivot_col);
             let basic = tableau.get_column(tableau.width - 1);
             let (pivot_row, _) = col
@@ -151,12 +143,10 @@ fn simplex_solve(mut tableau: Matrix) -> Matrix {
             if pivot == 0.0 {
                 continue;
             }
-            // dbg!(pivot_row, pivot);
 
             for x in 0..tableau.width {
                 tableau[(x, pivot_row)] /= pivot;
             }
-            // tableau[(pivot_col, pivot_row)] = 1.0;
             for y in 0..tableau.height {
                 if y == pivot_row {
                     continue;
@@ -165,9 +155,7 @@ fn simplex_solve(mut tableau: Matrix) -> Matrix {
                 for x in 0..tableau.width {
                     tableau[(x, y)] -= factor * tableau[(x, pivot_row)];
                 }
-                // tableau[(pivot_col, y)] = 0.0;
             }
-            // println!("{tableau}");
         } else {
             break;
         }
@@ -177,9 +165,7 @@ fn simplex_solve(mut tableau: Matrix) -> Matrix {
 
 fn simplex(tableau: Matrix) -> Matrix {
     let tableau = simplex_phase1(tableau);
-    // println!("{tableau}");
     let mut tableau = simplex_solve(tableau);
-    // println!("{tableau}");
 
     for x in 0..tableau.width {
         let mut is_identity = true;
