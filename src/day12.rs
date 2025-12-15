@@ -155,13 +155,12 @@ struct Region {
     area: Vec<Vec<bool>>,
 }
 impl Region {
-    fn try_place(&mut self, shape: &Shape) -> Result<(), ()> {
+    fn try_place(&mut self, shape: &Shape) -> Result<(usize, usize), ()> {
         let top_width = shape.width_at(0);
         for y in 0..self.height {
             for x in 0..self.width - top_width {
-                match self.try_place_at(&shape, (x, y)) {
-                    Ok(_) => return Ok(()),
-                    Err(_) => {}
+                if self.try_place_at(shape, (x, y)).is_ok() {
+                    return Ok((x, y));
                 }
             }
         }
@@ -185,6 +184,16 @@ impl Region {
         }
         self.quantities[shape.index] -= 1;
         Ok(())
+    }
+
+    fn remove_at(&mut self, shape: &Shape, (x, y): (usize, usize)) {
+        for j in 0..shape.height {
+            for i in 0..shape.width {
+                if shape[(i, j)] {
+                    self.area[y + j][x + i] = false;
+                }
+            }
+        }
     }
 }
 impl Display for Region {
@@ -248,7 +257,7 @@ fn parse(input: &str) -> (Vec<Shape>, Vec<Region>) {
     (shapes, regions)
 }
 
-fn place_in_region(region: &mut Region, i: usize, shapes: &[Shape]) -> Result<(), ()> {
+fn place_in_region(region: &mut Region, i: usize, shapes: &[HashSet<Shape>]) -> Result<(), ()> {
     if region.quantities[i] == 0 {
         if i + 1 < region.quantities.len() {
             return place_in_region(region, i + 1, shapes);
@@ -257,20 +266,15 @@ fn place_in_region(region: &mut Region, i: usize, shapes: &[Shape]) -> Result<()
         }
     }
 
-    let mut reg = region.clone();
-    let shape = &shapes[i];
-    for shape in shape.variants() {
-        match reg.try_place(&shape) {
-            Ok(_) => {
-                if let Err(_) = place_in_region(&mut reg, i, shapes) {
-                    reg = region.clone();
-                    continue;
-                }
-
-                *region = reg;
-                return Ok(());
+    let variants = &shapes[i];
+    for shape in variants {
+        if let Ok(pos) = region.try_place(shape) {
+            if place_in_region(region, i, shapes).is_err() {
+                region.remove_at(shape, pos);
+                continue;
             }
-            Err(_) => {}
+
+            return Ok(());
         }
     }
     Err(())
@@ -278,6 +282,7 @@ fn place_in_region(region: &mut Region, i: usize, shapes: &[Shape]) -> Result<()
 
 fn part1(shapes: &[Shape], mut regions: Vec<Region>) -> usize {
     let mut feasible = 0;
+    let shape_variants: Vec<_> = shapes.iter().map(|s| s.variants()).collect();
     for region in &mut regions {
         let required: usize = region
             .quantities
@@ -289,7 +294,7 @@ fn part1(shapes: &[Shape], mut regions: Vec<Region>) -> usize {
         if available < required {
             continue;
         }
-        if let Ok(_) = place_in_region(region, 0, shapes) {
+        if place_in_region(region, 0, &shape_variants).is_ok() {
             feasible += 1;
         }
     }
@@ -301,7 +306,7 @@ fn main() {
     let (shapes, regions) = parse(&input);
 
     let now = Instant::now();
-    let result1 = part1(&shapes, regions.clone());
+    let result1 = part1(&shapes, regions);
     let time1 = now.elapsed();
 
     println!("part1: {result1} after {time1:?}");
